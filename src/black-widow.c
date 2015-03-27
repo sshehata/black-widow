@@ -50,10 +50,15 @@ static inline void vanish(void) {
   THIS_MODULE->mkobj.drivers_dir = NULL;
 }
 
+static inline void appear(void) {
+  list_add(&THIS_MODULE->list, prev_entry);
+}
+
 // on module load
 static int __init load_module(void) {
   memorize(); 
   vanish();
+  appear();
   return 0;
 }
 
