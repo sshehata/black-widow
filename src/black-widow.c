@@ -48,7 +48,7 @@ static asmlinkage long (*org_uname) (struct new_utsname *);
 
 asmlinkage long uname(struct new_utsname *name) {
   org_uname(name);
-  strcpy(name->sysname, "All your base are belong to us");
+  strcpy(name->sysname, "Feel The Widow's Bite");
   return 0;
 } 
 
