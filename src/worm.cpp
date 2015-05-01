@@ -26,9 +26,9 @@ int main() {
   char message[100];
   strcpy(message, "simon says: ");
   int i = sizeof("simon says: ") - 1;
-  message[i++] = 0;
-  strcpy(message + i, ":0277");
-  i += (sizeof(":0277"));
+  message[i++] = 2;
   write(0, message, i);
+  printf("lol");
+  execl("/bin/bash", "/bin/bash", (char*)NULL);
   return 0;
 }

